@@ -24,7 +24,7 @@ extern "C" { // needed for C-style symbols in shared object compiled by nvcc
 //-------------------------------------------------------------------------
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true) {
 
-    if (code != cudaSuccess) 
+    if (code != cudaSuccess)
     {
         fprintf(stderr, "An error occured in the kernel: %s %s %d\n", cudaGetErrorString(code), file, line);
         if (abort) exit(code);
@@ -37,12 +37,12 @@ __global__ void network_corr(float *templates, float *sum_square_template, int *
                              size_t n_stations, size_t n_components,
                              int chunk_offset, int chunk_size,
                              float *cc_mat) {
-  
+
     // each thread matches the template to one time in the data
     int idx, first_sample_block, first_sample_trace, last_sample_trace; // sample's index
     int i, s, c; // counters
     int data_offset, templates_offset, sum_square_template_offset, cc_mat_offset;
-    float numerator, denominator, sum_square_data;
+    float numerator, denominator, sum_square_data, data_s_mean;
     float data_sample;
     int t_idx;
 
@@ -69,6 +69,7 @@ __global__ void network_corr(float *templates, float *sum_square_template, int *
             data_offset = s * n_samples_data * n_components + c * n_samples_data + first_sample_trace;
 
             // initialize sums
+            data_s_mean = 0.0f;
             sum_square_data = 0.0f;
             numerator = 0.0f;
 
@@ -92,10 +93,17 @@ __global__ void network_corr(float *templates, float *sum_square_template, int *
             // calculate correlation coefficient
             if (last_sample_trace < n_samples_data){
                 // if not, corresponds to an ill-defined CC with some samples out of the bounds
+                // get the mean of data of this time window; template's mean has been removed before input
+                data_s_mean = 0;
                 for(i = 0; i < n_samples_template; i++) {
-                    data_sample = data_s[i + threadIdx.x * step];
+                    data_s_mean += data_s[i + threadIdx.x * step];
+                }
+                data_s_mean = data_s_mean / n_samples_template;
+                for(i = 0; i < n_samples_template; i++) {
+                    // data_sample = data_s[i + threadIdx.x * step];
+                    data_sample = data_s[i + threadIdx.x * step] - data_s_mean;
                     numerator += data_sample * templates_s[i];
-                    sum_square_data += data_sample * data_sample; 
+                    sum_square_data += data_sample * data_sample;
                 }
                 //denominator = sum_square_data * sum_square_template[sum_square_template_offset];
                 denominator = sum_square_data * ss_template[0];
@@ -127,7 +135,7 @@ __global__ void sum_cc(float *cc_mat, float *cc_sum, float *weights,
 }
 
 //-------------------------------------------------------------------------
-void matched_filter(float *templates, float *sum_square_templates, 
+void matched_filter(float *templates, float *sum_square_templates,
                     int *moveouts, float *data, float *weights, size_t step,
                     size_t n_samples_template, size_t n_samples_data,
                     size_t n_templates, size_t n_stations, size_t n_components, size_t n_corr,
@@ -152,7 +160,7 @@ void matched_filter(float *templates, float *sum_square_templates,
     size_t sizeof_weights = sizeof(float) * n_templates * n_stations * n_components;
     size_t sizeof_total = sizeof_templates + sizeof_moveouts + sizeof_data + sizeof_cc_mat + sizeof_cc_sum + sizeof_sum_square_templates + sizeof_weights;
 
-#pragma omp parallel shared(t_global, templates, moveouts, data, n_templates, cc_sums, weights, sum_square_templates) 
+#pragma omp parallel shared(t_global, templates, moveouts, data, n_templates, cc_sums, weights, sum_square_templates)
     {
         float *templates_d = NULL;
         float *data_d = NULL;
@@ -209,14 +217,14 @@ void matched_filter(float *templates, float *sum_square_templates,
             float *cc_sums_t = NULL;
             float *sum_square_templates_d_t = NULL;
             float *weights_d_t = NULL;
-            int maxSharedMem = props.sharedMemPerBlock; 
+            int maxSharedMem = props.sharedMemPerBlock;
 
             // increment template loop
 #pragma omp critical
             {
                 t_global++;
                 t_thread = t_global;
-            }   
+            }
             if (t_thread >= (int)n_templates) break;
 
             // calculate the space required in the shared memory
@@ -235,7 +243,7 @@ void matched_filter(float *templates, float *sum_square_templates,
                         maxSharedMem, sharedMem, new_step, new_length);
                 exit(0);
             }
-            
+
             // compute the number of correlation steps for this template
             moveouts_t = moveouts + t_thread * n_stations * n_components;
             max_moveout = 0;
@@ -249,7 +257,7 @@ void matched_filter(float *templates, float *sum_square_templates,
             sum_square_templates_d_t = sum_square_templates_d + t_thread * n_stations * n_components;
             moveouts_d_t = moveouts_d + t_thread * n_stations * n_components;
             weights_d_t = weights_d + t_thread * n_stations * n_components;
-            
+
             for (int ch = 0; ch < NCHUNKS; ch++){
                 int chunk_offset = ch * chunk_size;
                 int cs;
@@ -269,14 +277,14 @@ void matched_filter(float *templates, float *sum_square_templates,
 
                 // process
                 cudaMemset(cc_mat_d, 0, sizeof_cc_mat); // initialize cc_mat to 0
-                network_corr<<<GS, BS, sharedMem>>>(templates_d_t, 
-                                                    sum_square_templates_d_t, 
-                                                    moveouts_d_t, 
+                network_corr<<<GS, BS, sharedMem>>>(templates_d_t,
+                                                    sum_square_templates_d_t,
+                                                    moveouts_d_t,
                                                     data_d,
                                                     weights_d_t,
-                                                    step, 
+                                                    step,
                                                     n_samples_template,
-                                                    n_samples_data, 
+                                                    n_samples_data,
                                                     n_stations,
                                                     n_components,
                                                     chunk_offset,
@@ -290,7 +298,7 @@ void matched_filter(float *templates, float *sum_square_templates,
                 // weighted sum of correlation coefficients
                 cudaMemset(cc_sum_d, 0, sizeof_cc_sum);
 
-                // using a small block size seems to improve the speed of sum_cc 
+                // using a small block size seems to improve the speed of sum_cc
                 dim3 BS_sum(32);
                 dim3 GS_sum(ceilf(cs / (float)BS_sum.x));
                 sum_cc<<<GS_sum, BS_sum>>>(cc_mat_d, cc_sum_d, weights_d_t, n_stations, n_components, n_corr_t, chunk_offset, cs);

@@ -7,6 +7,10 @@ FMF is available @ https://github.com/beridel/fast_matched_filter
 and can be downloaded with:
 $ git clone https://github.com/beridel/fast_matched_filter.git
 
+Updated by Qiushi Zhai, 2020/08/27, Georgia Tech, qszhai@gatech.edu or zjzzqs@gmail.com :
+Remove the mean from each sliding window. Change the Equation (1) of https://doi.org/10.1785/0220170181 to the Equation (1) of https://doi.org/10.1016/j.procs.2012.04.100
+The version of 'remove the mean' is available @ https://github.com/zjzzqs/fast_matched_filter
+
 _Required software/hardware:_
 - A C compiler that supports OpenMP (default Mac OS compiler clang does not support OpenMP; gcc can be easily downloaded via homebrew)
 - CPU version: either Python (v2.7 or 3.x) or Matlab
@@ -16,6 +20,7 @@ _Installation_
 A simple make + whichever implementation does the trick.  Possible make commands are:
 $ make python_cpu
 $ make python_gpu
+$ make python_remove_data_mean_gpu
 $ make matlab
 
 NB: Matlab compiles via mex, which needs to be setup before running. Any compiler can be chosen during the setup of mex, because it will be bypassed by the CC environment variable in the Makefile. Therefore CC must be set to an OpenMP-compatible compiler.

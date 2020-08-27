@@ -12,6 +12,9 @@ import numpy as np
 import ctypes as ct
 import datetime as dt
 import os
+from scipy import signal
+
+remove_data_mean = True
 
 path = os.path.join(os.path.dirname(__file__), 'lib')
 CPU_LOADED = False
@@ -55,7 +58,10 @@ except OSError:
     CPU_LOADED = False
 
 try:
-    _libGPU = ct.cdll.LoadLibrary(os.path.join(path, 'matched_filter_GPU.so'))
+    if not remove_data_mean:
+        _libGPU = ct.cdll.LoadLibrary(os.path.join(path, 'matched_filter_GPU.so'))
+    else:
+        _libGPU = ct.cdll.LoadLibrary(os.path.join(path, 'matched_filter_remove_data_mean_GPU.so'))
     _libGPU.matched_filter.argtypes = [
         ct.POINTER(ct.c_float),    # templates
         ct.POINTER(ct.c_float),    # sum_square_templates
@@ -134,7 +140,7 @@ def matched_filter(templates, moveouts, weights, data, step, arch='cpu'):
 
     elif templates.ndim == data.ndim:
         n_templates = np.int32(1)
-        
+
         assert templates.shape[0] == data.shape[0] # check stations
         n_stations = np.int32(templates.shape[0])
 
@@ -148,7 +154,7 @@ def matched_filter(templates, moveouts, weights, data, step, arch='cpu'):
 
     else:
         impossible_dimensions = True
-    
+
     n_samples_template = templates.shape[-1]
     if templates.shape != (n_templates, n_stations, n_components, n_samples_template):
         templates = templates.reshape(n_templates, n_stations, n_components, n_samples_template)
@@ -176,6 +182,9 @@ def matched_filter(templates, moveouts, weights, data, step, arch='cpu'):
         return
 
     n_corr = np.int32((n_samples_data - n_samples_template) / step + 1)
+
+    # remove the mean of templates
+    templates = signal.detrend(templates,axis=-1,type='constant')
 
     # compute sum of squares for templates
     sum_square_templates = np.sum(templates**2, axis=-1).astype(np.float32)
@@ -222,7 +231,7 @@ def matched_filter(templates, moveouts, weights, data, step, arch='cpu'):
             n_components,
             n_corr,
             cc_sums.ctypes.data_as(ct.POINTER(ct.c_float)))
-    
+
     elif arch == 'gpu':
         _libGPU.matched_filter(
                 templates.ctypes.data_as(ct.POINTER(ct.c_float)),

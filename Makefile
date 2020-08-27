@@ -19,7 +19,8 @@ mex_extension=mexa64
 
 all: $(libdir)/matched_filter_GPU.so $(libdir)/matched_filter_CPU.so $(maindir)/matched_filter.$(mex_extension)
 python_cpu: $(libdir)/matched_filter_CPU.so
-python_gpu: $(libdir)/matched_filter_GPU.so 
+python_gpu: $(libdir)/matched_filter_GPU.so
+python_remove_data_mean_gpu: $(libdir)/matched_filter_remove_data_mean_GPU.so
 matlab: $(maindir)/matched_filter.$(mex_extension) $(maindir)/matched_filter_precise.$(mex_extension)
 .SUFFIXES: .c .cu
 
@@ -42,6 +43,9 @@ CFLAGS_MEX=-fopenmp -fPIC -march=native
 LDFLAGS_MEX=-fopenmp -shared
 
 # build for python
+$(libdir)/matched_filter_remove_data_mean_GPU.so: $(srcdir)/matched_filter_remove_data_mean.cu
+	$(NVCC) $(COPTIMFLAGS_GPU) $(CFLAGS_GPU) $(CARDDEPENDENTFLAG) $(LDFLAGS_GPU) $< -o $@
+
 $(libdir)/matched_filter_GPU.so: $(srcdir)/matched_filter.cu
 	$(NVCC) $(COPTIMFLAGS_GPU) $(CFLAGS_GPU) $(CARDDEPENDENTFLAG) $(LDFLAGS_GPU) $< -o $@
 
