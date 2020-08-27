@@ -17,7 +17,7 @@ MEX=mex
 # Windows: mexw64
 mex_extension=mexa64
 
-all: $(libdir)/matched_filter_GPU.so $(libdir)/matched_filter_CPU.so $(maindir)/matched_filter.$(mex_extension)
+all: $(libdir)/matched_filter_remove_data_mean_GPU.so $(libdir)/matched_filter_GPU.so $(libdir)/matched_filter_CPU.so $(maindir)/matched_filter.$(mex_extension)
 python_cpu: $(libdir)/matched_filter_CPU.so
 python_gpu: $(libdir)/matched_filter_GPU.so
 python_remove_data_mean_gpu: $(libdir)/matched_filter_remove_data_mean_GPU.so
