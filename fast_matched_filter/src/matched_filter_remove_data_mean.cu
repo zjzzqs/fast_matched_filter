@@ -36,7 +36,7 @@ __global__ void network_corr(float *templates, float *sum_square_template, int *
                              size_t step, size_t n_samples_template, size_t n_samples_data,
                              size_t n_stations, size_t n_components,
                              int chunk_offset, int chunk_size,
-                             float *cc_mat) {
+                             float *cc_mat, int normalize) {
 
     // each thread matches the template to one time in the data
     int idx, first_sample_block, first_sample_trace, last_sample_trace; // sample's index
@@ -139,7 +139,7 @@ void matched_filter(float *templates, float *sum_square_templates,
                     int *moveouts, float *data, float *weights, size_t step,
                     size_t n_samples_template, size_t n_samples_data,
                     size_t n_templates, size_t n_stations, size_t n_components, size_t n_corr,
-                    float *cc_sums) {
+                    float *cc_sums, int normalize) {
 
     int t_global = -1;
     int nGPUs;
@@ -289,7 +289,8 @@ void matched_filter(float *templates, float *sum_square_templates,
                                                     n_components,
                                                     chunk_offset,
                                                     cs,
-                                                    cc_mat_d);
+                                                    cc_mat_d,
+                                                    normalize);
 
                 // return an error if something happened in the kernel (and crash the program)
                 gpuErrchk(cudaPeekAtLastError());
