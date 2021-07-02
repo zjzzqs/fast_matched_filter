@@ -84,7 +84,8 @@ except OSError:
     GPU_LOADED = False
 
 
-def matched_filter(templates, moveouts, weights, data, step, arch='cpu'):
+def matched_filter(templates, moveouts, weights, data, step, arch='cpu', 
+                   check_zeros='first', normalize='short'):
     """
     input:
     templates ---------- 4D numpy array [templates x stations x
@@ -98,16 +99,34 @@ def matched_filter(templates, moveouts, weights, data, step, arch='cpu'):
                          time]
                          or 2D numpy array [traces x time]
     step --------------- interval between correlations (in samples)
-    arch --------------- 'cpu' or 'gpu' implementation
+    arch --------------- 'cpu', 'precise' or 'gpu' implementation
                          new: 'precise' for a more precise but slower
                          CPU implementation
+    check_zeros ------------ integer: 0, 1 or 2, default to 1.
+                         Controls the verbosity level at the end of this
+                         routine when checking zeros in the time series
+                         of correlation coefficients (CCs).
+                         False: No messages.
+                         'first': Check zeros on the first template's CCs (recommended).
+                         'all': Check zeros on each template's CCs. It can be useful
+                         for troubleshooting but in general this would
+                         print too many messages.
+    normalize ---------- Either "short" or "full" - full is slower but removes
+                         the mean of the data at every correlation. Short
+                         is the original implementation.
 
-    NB: Mean and trend MUST be removed from template and data traces before
-        using this function
+    NB: When using normalize="short", the templates and the data sliding windows
+        must have zero means (high-pass filter the data if necessary).
 
     output:
     2D numpy array (np.float32) [templates x time (at step defined interval)]
     """
+    assert normalize in ("short", "full"), "Only know short or full normalization methods"
+    if normalize == "full":
+        normalize = 1
+        assert arch != "cpu", "Full normalization not supported with cpu arch - try arch=precise"
+    else:
+        normalize = 0
 
     if arch.lower() == 'cpu' and CPU_LOADED is False:
         loaded = False
@@ -155,6 +174,10 @@ def matched_filter(templates, moveouts, weights, data, step, arch='cpu'):
     else:
         impossible_dimensions = True
 
+    if impossible_dimensions:
+        print("Template and data dimensions are not compatible!")
+        return
+   
     n_samples_template = templates.shape[-1]
     if templates.shape != (n_templates, n_stations, n_components, n_samples_template):
         templates = templates.reshape(n_templates, n_stations, n_components, n_samples_template)
@@ -176,10 +199,6 @@ def matched_filter(templates, moveouts, weights, data, step, arch='cpu'):
             weights = np.repeat(weights, n_components).reshape(n_templates, n_stations, n_components)
         elif (n_templates * n_stations * n_components) / weights.size == 1.:
             weights = weights.reshape(n_templates, n_stations, n_components)
-
-    if impossible_dimensions:
-        print("Template and data dimensions are not compatible!")
-        return
 
     n_corr = np.int32((n_samples_data - n_samples_template) / step + 1)
 
@@ -230,8 +249,9 @@ def matched_filter(templates, moveouts, weights, data, step, arch='cpu'):
             n_stations,
             n_components,
             n_corr,
-            cc_sums.ctypes.data_as(ct.POINTER(ct.c_float)))
-
+            cc_sums.ctypes.data_as(ct.POINTER(ct.c_float)),
+            normalize)
+    
     elif arch == 'gpu':
         _libGPU.matched_filter(
                 templates.ctypes.data_as(ct.POINTER(ct.c_float)),
@@ -246,20 +266,39 @@ def matched_filter(templates, moveouts, weights, data, step, arch='cpu'):
                 n_stations,
                 n_components,
                 n_corr,
-                cc_sums.ctypes.data_as(ct.POINTER(ct.c_float)))
+                cc_sums.ctypes.data_as(ct.POINTER(ct.c_float)),
+                normalize)
 
     cc_sums = cc_sums.reshape((n_templates, n_corr))
-    zeros = np.sum(cc_sums[0, :int(n_corr - moveouts.max() / step)] == 0.)
-    if zeros > 10:
-        print("{} correlation computations were skipped. Can be caused by"
-              " zeros in data, or too low amplitudes (try to increase the "
-              "gain).".format(zeros))
+    # check for zeros in the CC time series more or less thoroughly
+    # depending on the value of 'check_zeros'
+    if (check_zeros != False) and (check_zeros != 'first') and (check_zeros != 'all'):
+        print("check_zeros should be False, 'first', or 'all'. Set it to "
+              "the default value: 'first'")
+        check_zeros = 'first'
+    if not check_zeros:
+        pass
+    elif check_zeros == 'first':
+        # only check the first template
+        zeros = np.sum(
+                cc_sums[0:1, :int(n_corr - moveouts.max()/step)] == 0., axis=-1)
+    else:
+        # check all templates
+        zeros = np.sum(
+                cc_sums[:, :int(n_corr - moveouts.max()/step)] == 0., axis=-1)
+    if check_zeros:
+        for t in range(zeros.shape[0]):
+            if zeros[t] > 10:
+                print("{} correlation computations were skipped on the {:d}-th "
+                      "template. Can be caused by zeros in data, or too low "
+                      "amplitudes (try to increase the gain).".
+                      format(zeros[t], t))
     return cc_sums
 
 
 def test_matched_filter(n_templates=1, n_stations=1, n_components=1,
                         template_duration=10, data_duration=86400,
-                        sampling_rate=100, step=1, arch='cpu'):
+                        sampling_rate=100, step=1, arch='cpu', check_zeros='first'):
     """
     output: templates, moveouts, data, step, cc_sum
     """
@@ -327,7 +366,8 @@ def test_matched_filter(n_templates=1, n_stations=1, n_components=1,
                             weights,
                             data,
                             step,
-                            arch=arch)
+                            arch=arch,
+                            check_zeros=check_zeros)
     stop_time = dt.datetime.now()
 
     print("Matched filter ({}) for {} templates on {} stations/{} "
