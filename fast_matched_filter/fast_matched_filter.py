@@ -14,7 +14,7 @@ import datetime as dt
 import os
 from scipy import signal
 
-remove_data_mean = True
+remove_data_mean = False
 
 path = os.path.join(os.path.dirname(__file__), 'lib')
 CPU_LOADED = False
